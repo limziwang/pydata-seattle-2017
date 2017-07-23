@@ -3,7 +3,10 @@
 # Reference for hyper-parameter tunining for Deep Architecture: https://arxiv.org/abs/1206.5533
 
 import tensorflow as tf
+# Enable logging ...
+# tf.logging.set_verbosity(tf.logging.INFO)
 from tensorflow.examples.tutorials.mnist import input_data
+
 
 import argparse
 import sys
@@ -46,23 +49,31 @@ def convolutional_neural_network_model(data, no_of_classes, keep_rate):
     return output
 
 
-def train_neural_network(data, x_placeholder, y_placeholder, epochs, no_of_classes, learning_rate, keep_rate=0.5,
-                         device_type='cpu:0', batch_size=128):
+def train_neural_network(data, x_placeholder, y_placeholder, epochs, no_of_classes, learning_rate, device_type,
+                         keep_rate=0.5, batch_size=128):
     with tf.device(device_type):
         prediction = convolutional_neural_network_model(x_placeholder, no_of_classes, keep_rate)
-        cost = tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits(logits=prediction, labels=y_placeholder) )
+        with tf.name_scope('Loss'):
+            cost = tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits(logits=prediction, labels=y_placeholder) )
 
-        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, epsilon=0.1).minimize(cost)
+        with tf.name_scope('Optimizer'):
+            optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, epsilon=0.1).minimize(cost)
+
+        tf.summary.scalar("Loss", cost)
+        tf.summary.scalar("Optimizer", optimizer)
+        merged_summary_op = tf.summary.merge_all()
 
     hm_epochs = epochs
-    with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
+    # tf.ConfigProto will ...
+    with tf.Session(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=True)) as sess:
         sess.run(tf.global_variables_initializer())
 
         for epoch in range(hm_epochs):
             epoch_loss = 0
             for _ in range(int(data.train.num_examples/batch_size)):
                 epoch_x, epoch_y = data.train.next_batch(batch_size)
-                _, c = sess.run([optimizer, cost], feed_dict={x_placeholder: epoch_x, y_placeholder: epoch_y})
+                _, c, summary = sess.run([optimizer, cost], merged_summary_op,
+                                         feed_dict={x_placeholder: epoch_x, y_placeholder: epoch_y})
                 epoch_loss += c
 
             print('Epoch', epoch, 'completed out of',hm_epochs,'loss:', epoch_loss)
@@ -71,8 +82,6 @@ def train_neural_network(data, x_placeholder, y_placeholder, epochs, no_of_class
 
         accuracy = tf.reduce_mean(tf.cast(correct, 'float'))
         print('Accuracy:', accuracy.eval({x_placeholder:data.test.images, y_placeholder:data.test.labels}))
-        return json.dumps({'Accuracy': accuracy.eval({x_placeholder:data.test.images,
-                                                      y_placeholder:data.test.labels})})
 
 
 def main(args):
@@ -83,13 +92,14 @@ def main(args):
     keep_rate = args.keep_rate
     epochs = args.epoch
     l_r = args.learning_rate
+    device_type = args.device_type
 
     x_ = tf.placeholder(tf.float32, [None, 784])
     y_ = tf.placeholder(tf.float32, [None, 10])
 
 
     train_neural_network(data=mnist, x_placeholder=x_, y_placeholder=y_, epochs=epochs, no_of_classes=n_classes,
-                         keep_rate=keep_rate, device_type='cpu:0', batch_size=batch_size, learning_rate=l_r)
+                         keep_rate=keep_rate, device_type=device_type, batch_size=batch_size, learning_rate=l_r)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -105,6 +115,10 @@ if __name__ == '__main__':
     parser.add_argument('--epoch', type=int,
                         default=10,
                         help='number of iterations')
+
+    parser.add_argument('--device_type', type=string,
+                        default='/cpu:0',
+                        help='device type:''/cpu:0'' or ''/gpu:0''')
     args = parser.parse_args()
 
     main(args)
