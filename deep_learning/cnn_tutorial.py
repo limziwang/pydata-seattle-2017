@@ -12,6 +12,7 @@ import argparse
 import sys
 import json
 
+logs_path = '/tmp/tensorflow_logs/cnn_example'
 
 def conv2d(x, W):
     return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
@@ -56,32 +57,46 @@ def train_neural_network(data, x_placeholder, y_placeholder, epochs, no_of_class
         with tf.name_scope('Loss'):
             cost = tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits(logits=prediction, labels=y_placeholder) )
 
-        with tf.name_scope('Optimizer'):
-            optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, epsilon=0.1).minimize(cost)
-
+        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, epsilon=0.1).minimize(cost)
         tf.summary.scalar("Loss", cost)
-        tf.summary.scalar("Optimizer", optimizer)
+
+        with tf.name_scope('Accuracy'):
+            with tf.name_scope('correct_prediction'):
+                correct_prediction = tf.equal(tf.argmax(prediction, 1), tf.argmax(y_placeholder, 1))
+            with tf.name_scope('Accuracy'):
+                accuracy = tf.reduce_mean(tf.cast(correct_prediction, 'float'))
+        tf.summary.scalar('accuracy', accuracy)
+
+        # Merge the summary op
         merged_summary_op = tf.summary.merge_all()
 
+    # number of iterations
     hm_epochs = epochs
-    # tf.ConfigProto will ...
+    initializer = tf.global_variables_initializer()
+
     with tf.Session(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=True)) as sess:
-        sess.run(tf.global_variables_initializer())
+        sess.run(initializer)
+
+        # write logs to Tensorboard
+        summary_writer = tf.summary.FileWriter(logs_path, graph=tf.get_default_graph())
 
         for epoch in range(hm_epochs):
             epoch_loss = 0
             for _ in range(int(data.train.num_examples/batch_size)):
                 epoch_x, epoch_y = data.train.next_batch(batch_size)
-                _, c, summary = sess.run([optimizer, cost], merged_summary_op,
+                _, c, summary = sess.run([optimizer, cost, merged_summary_op],
                                          feed_dict={x_placeholder: epoch_x, y_placeholder: epoch_y})
+
+                # Write log at every iteration
+                summary_writer.add_summary(summary, epoch)
+
                 epoch_loss += c
 
             print('Epoch', epoch, 'completed out of',hm_epochs,'loss:', epoch_loss)
 
-        correct = tf.equal(tf.argmax(prediction, 1), tf.argmax(y_placeholder, 1))
 
-        accuracy = tf.reduce_mean(tf.cast(correct, 'float'))
-        print('Accuracy:', accuracy.eval({x_placeholder:data.test.images, y_placeholder:data.test.labels}))
+        accuracy_metric = accuracy.eval({x_placeholder:data.test.images, y_placeholder:data.test.labels})
+        print('Accuracy on Test set:', accuracy_metric)
 
 
 def main(args):
@@ -116,7 +131,7 @@ if __name__ == '__main__':
                         default=10,
                         help='number of iterations')
 
-    parser.add_argument('--device_type', type=string,
+    parser.add_argument('--device_type', type=str,
                         default='/cpu:0',
                         help='device type:''/cpu:0'' or ''/gpu:0''')
     args = parser.parse_args()
